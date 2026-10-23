@@ -2207,9 +2207,11 @@ function markAllPresent() {
 
 function clearAllStatus() {
   const sess=getActiveSess(); if(!sess) return;
-  openConfirm('Limpiar estados','¿Borrar todos los estados de esta sesión?',()=>{
-    sess.team.forEach(m=>{m.status='';m.obs='';});
-    save(); renderLista();
+  _requireAdminPin('Limpiar todos los estados de la sesión activa', function(){
+    openConfirm('Limpiar estados','¿Borrar todos los estados de esta sesión?',function(){
+      sess.team.forEach(function(m){m.status='';m.obs='';});
+      save(); renderLista();
+    });
   });
 }
 
@@ -2788,17 +2790,21 @@ function renderHistorial() {
 
 function deleteSession(id) {
   const s=S.sessions.find(x=>x.id===id); if(!s) return;
-  openConfirm('Eliminar sesión',`¿Eliminar la sesión del ${fmtDate(s.date)}, ${TURN_NAME[s.turno]}, supervisor: ${s.supervisor}?`,()=>{
-    S.sessions=S.sessions.filter(x=>x.id!==id);
-    if(S.currentSession===id){S.currentSession=null;}
-    save(); renderHistorial(); renderDashboard(); renderIncidencias();
+  _requireAdminPin('Eliminar sesión: '+fmtDate(s.date)+' · '+TURN_NAME[s.turno]+' · '+s.supervisor, function(){
+    openConfirm('Eliminar sesión',`¿Eliminar la sesión del ${fmtDate(s.date)}, ${TURN_NAME[s.turno]}, supervisor: ${s.supervisor}?`,()=>{
+      S.sessions=S.sessions.filter(x=>x.id!==id);
+      if(S.currentSession===id){S.currentSession=null;}
+      save(); renderHistorial(); renderDashboard(); renderIncidencias();
+    });
   });
 }
 
 function purgeAllSessions() {
-  openConfirm('⚠️ Purgar todas las sesiones','Esta acción elimina TODAS las sesiones guardadas. No se puede deshacer.',()=>{
-    S.sessions=[];S.currentSession=null;save();renderDashboard();renderIncidencias();renderHistorial();
-  },'Purgar todo');
+  _requireAdminPin('Purgar TODAS las sesiones guardadas (no se puede deshacer)', function(){
+    openConfirm('⚠️ Purgar todas las sesiones','Esta acción elimina TODAS las sesiones guardadas. No se puede deshacer.',function(){
+      S.sessions=[];S.currentSession=null;save();renderDashboard();renderIncidencias();renderHistorial();
+    },'Purgar todo');
+  });
 }
 
 function openSessDetail(id) {
@@ -3303,6 +3309,72 @@ function submitPwdChange() {
     document.body.appendChild(t);
     setTimeout(function(){t.remove();},3000);
   });
+}
+
+
+/* ══════════════════════════════════════════════════
+   CANDADO DE SEGURIDAD — Acciones destructivas
+   Solo sv0 (Administrador) puede confirmar con contraseña.
+   ══════════════════════════════════════════════════ */
+function _requireAdminPin(accion, onConfirm) {
+  // Crear overlay
+  var ov = document.createElement('div');
+  ov.id = 'admin-lock-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center';
+  ov.innerHTML = [
+    '<div style="background:var(--bg,#fff);border-radius:14px;padding:28px 32px;max-width:360px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:DM Sans,sans-serif">',
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">',
+        '<span style="font-size:26px">🔒</span>',
+        '<div>',
+          '<div style="font-size:14px;font-weight:700;color:var(--tx,#111)">Acción protegida</div>',
+          '<div style="font-size:11px;color:var(--tx3,#888);margin-top:2px">'+accion+'</div>',
+        '</div>',
+      '</div>',
+      '<p style="font-size:12px;color:var(--tx2,#555);margin:0 0 14px">Solo el administrador puede realizar esta acción. Ingresa la contraseña de administrador para continuar.</p>',
+      '<input id="admin-lock-pass" type="password" placeholder="Contraseña de administrador" autocomplete="off"',
+        ' style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--brd,#ddd);border-radius:8px;font-size:13px;',
+               'font-family:DM Sans,sans-serif;background:var(--bg,#fff);color:var(--tx,#111);margin-bottom:8px">',
+      '<div id="admin-lock-err" style="font-size:11px;color:#ef4444;min-height:16px;margin-bottom:10px"></div>',
+      '<div style="display:flex;gap:8px;justify-content:flex-end">',
+        '<button onclick="document.getElementById('admin-lock-overlay').remove()"',
+          ' style="padding:8px 18px;border:1px solid var(--brd,#ddd);border-radius:8px;background:var(--bg2,#f5f5f5);',
+                 'color:var(--tx,#111);font-size:12px;font-family:DM Sans,sans-serif;cursor:pointer">Cancelar</button>',
+        '<button id="admin-lock-ok"',
+          ' style="padding:8px 18px;border:none;border-radius:8px;background:#dc2626;color:#fff;',
+                 'font-size:12px;font-weight:600;font-family:DM Sans,sans-serif;cursor:pointer">Confirmar</button>',
+      '</div>',
+    '</div>'
+  ].join('');
+  document.body.appendChild(ov);
+
+  var inp = document.getElementById('admin-lock-pass');
+  var err = document.getElementById('admin-lock-err');
+  inp.focus();
+
+  function tryConfirm() {
+    var entered = inp.value;
+    // Verificar contraseña: primero Firebase cache, luego pass inline sv0
+    var sv0 = (typeof SUPERVISORS !== 'undefined') ? SUPERVISORS.find(function(s){return s.id==='sv0';}) : null;
+    var passOk = false;
+    if (typeof _authCache !== 'undefined' && _authCache && _authCache['sv0']) {
+      passOk = (entered === _authCache['sv0']);
+    } else if (sv0) {
+      passOk = (entered === sv0.pass);
+    }
+    if (passOk) {
+      ov.remove();
+      onConfirm();
+    } else {
+      err.textContent = 'Contraseña incorrecta. Inténtalo de nuevo.';
+      inp.value = '';
+      inp.focus();
+    }
+  }
+
+  document.getElementById('admin-lock-ok').onclick = tryConfirm;
+  inp.addEventListener('keydown', function(e){ if(e.key==='Enter') tryConfirm(); });
+  // Cerrar con Escape
+  ov.addEventListener('keydown', function(e){ if(e.key==='Escape') ov.remove(); });
 }
 
 </script>
