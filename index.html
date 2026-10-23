@@ -3312,10 +3312,8 @@ function submitPwdChange() {
 }
 
 
-/* ══════════════════════════════════════════════════
-   CANDADO DE SEGURIDAD — Acciones destructivas
-   Solo sv0 (Administrador) puede confirmar con contraseña.
-   ══════════════════════════════════════════════════ */
+/* CANDADO DE SEGURIDAD - Acciones destructivas
+   Solo sv0 (Administrador) puede confirmar con contrasena. */
 function _requireAdminPin(accion, onConfirm) {
   // Crear overlay
   var ov = document.createElement('div');
